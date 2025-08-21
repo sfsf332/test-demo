@@ -175,7 +175,7 @@ export default function Home() {
     
     try {
       // 如果是手机环境，强制使用后置摄像头
-      const facingMode = isMobile ? "environment" : (currentCamera === "environment" ? "environment" : "user");
+      const facingMode = isMobile ? { exact: "environment"} : (currentCamera === "environment" ? "environment" : "user");
       
       // 首先申请摄像头权限
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -446,7 +446,7 @@ export default function Home() {
                   type="submit"
                   className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
                 >
-                  提交
+                  写入localStorage
                 </button>
                 
                 <button
