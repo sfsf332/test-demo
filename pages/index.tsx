@@ -37,6 +37,19 @@ export default function Home() {
       try {
         const parsedData = JSON.parse(savedData);
         setFormData(parsedData);
+        
+        // 如果有localStorage数据，自动生成加密字符串和二维码
+        const dataToEncrypt = JSON.stringify(parsedData);
+        const encryptedData = CryptoJS.AES.encrypt(dataToEncrypt, 'your-secret-key').toString();
+        setEncryptedString(encryptedData);
+        
+        // 生成二维码
+        QRCode.toDataURL(encryptedData).then(qrCodeDataUrl => {
+          setQrCodeUrl(qrCodeDataUrl);
+        }).catch(error => {
+          console.error('自动生成二维码失败:', error);
+        });
+        
       } catch (error) {
         console.error('解析localStorage数据失败:', error);
       }
@@ -89,10 +102,33 @@ export default function Home() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
+    const newFormData = {
+      ...formData,
       [name]: value
-    }));
+    };
+    setFormData(newFormData);
+    
+    // 如果两个字段都有值，自动更新加密字符串和二维码
+    if (newFormData.did && newFormData.asign_key) {
+      try {
+        const dataToEncrypt = JSON.stringify(newFormData);
+        const encryptedData = CryptoJS.AES.encrypt(dataToEncrypt, 'your-secret-key').toString();
+        setEncryptedString(encryptedData);
+        
+        // 更新二维码
+        QRCode.toDataURL(encryptedData).then(qrCodeDataUrl => {
+          setQrCodeUrl(qrCodeDataUrl);
+        }).catch(error => {
+          console.error('更新二维码失败:', error);
+        });
+      } catch (error) {
+        console.error('更新加密数据失败:', error);
+      }
+    } else {
+      // 如果字段不完整，清空二维码和加密字符串
+      setQrCodeUrl("");
+      setEncryptedString("");
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -105,11 +141,8 @@ export default function Home() {
     // 显示成功提示
     alert('数据已成功保存到localStorage！');
     
-    // 清空表单
-    setFormData({
-      did: "",
-      asign_key: ""
-    });
+    // 注意：不清空表单，保持数据在界面上
+    // 这样用户可以继续看到二维码，方便分享
   };
 
   const generateEncryptedQRCode = async () => {
@@ -247,15 +280,15 @@ export default function Home() {
       // 使用setTimeout确保DOM元素已经渲染
       setTimeout(() => {
         try {
-          // 创建扫描器，配置为优先使用后置摄像头
-          scannerRef.current = new Html5QrcodeScanner(
-            "qr-reader",
-            { 
-              fps: 10, 
-              qrbox: { width: 250, height: 250 }
-            },
-            false
-          );
+                  // 创建扫描器，配置为优先使用后置摄像头，并设置中文界面
+        scannerRef.current = new Html5QrcodeScanner(
+          "qr-reader",
+          { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 }
+          },
+          false
+        );
           
           // 在扫描器渲染完成后，尝试选择后置摄像头
                   scannerRef.current.render((decodedText) => {
@@ -301,18 +334,73 @@ export default function Home() {
           console.error('扫描错误:', error);
         });
 
-          // 尝试自动选择后置摄像头（如果可用）
-          if (currentCamera === "environment") {
-            // 延迟一下，等待扫描器完全初始化
-            setTimeout(() => {
-              try {
-                // 这里可以尝试通过DOM操作来切换摄像头
-                // 由于html5-qrcode的限制，我们主要通过用户手动切换来实现
-              } catch (error) {
-                console.log('自动选择后置摄像头失败，用户可手动切换');
-              }
-            }, 1000);
+        // 在扫描器渲染完成后，替换英文标签为中文
+        setTimeout(() => {
+          try {
+            // 替换扫描器中的英文标签为中文
+            const qrReader = document.getElementById('qr-reader');
+            if (qrReader) {
+              // 替换标题
+              const titleElements = qrReader.querySelectorAll('h1');
+              titleElements.forEach(el => {
+                if (el.textContent?.includes('QR Code Scanner')) {
+                  el.textContent = '二维码扫描器';
+                }
+              });
+
+              // 替换描述文字
+              const descElements = qrReader.querySelectorAll('p');
+              descElements.forEach(el => {
+                if (el.textContent?.includes('Select a file to scan')) {
+                  el.textContent = '选择文件进行扫描';
+                } else if (el.textContent?.includes('Or drag and drop a file')) {
+                  el.textContent = '或拖拽文件到此处';
+                } else if (el.textContent?.includes('No file selected')) {
+                  el.textContent = '未选择文件';
+                }
+              });
+
+              // 替换按钮文字
+              const buttonElements = qrReader.querySelectorAll('button');
+              buttonElements.forEach(el => {
+                if (el.textContent?.includes('Select File')) {
+                  el.textContent = '选择文件';
+                } else if (el.textContent?.includes('Start Scanning')) {
+                  el.textContent = '开始扫描';
+                } else if (el.textContent?.includes('Stop Scanning')) {
+                  el.textContent = '停止扫描';
+                } else if (el.textContent?.includes('Switch Camera')) {
+                  el.textContent = '切换摄像头';
+                }
+              });
+
+              // 替换选择框选项
+              const selectElements = qrReader.querySelectorAll('select');
+              selectElements.forEach(el => {
+                if (el.textContent?.includes('Environment')) {
+                  el.textContent = el.textContent.replace('Environment', '后置摄像头');
+                } else if (el.textContent?.includes('User')) {
+                  el.textContent = el.textContent.replace('User', '前置摄像头');
+                }
+              });
+            }
+          } catch (error) {
+            console.log('替换中文标签失败:', error);
           }
+        }, 500);
+
+        // 尝试自动选择后置摄像头（如果可用）
+        if (currentCamera === "environment") {
+          // 延迟一下，等待扫描器完全初始化
+          setTimeout(() => {
+            try {
+              // 这里可以尝试通过DOM操作来切换摄像头
+              // 由于html5-qrcode的限制，我们主要通过用户手动切换来实现
+            } catch (error) {
+              console.log('自动选择后置摄像头失败，用户可手动切换');
+            }
+          }, 1000);
+        }
         } catch (error) {
           console.error('创建扫描器失败:', error);
           alert('创建扫描器失败，请重试！');
@@ -563,6 +651,9 @@ export default function Home() {
                     下载二维码
                   </button>
                 </div>
+                <div className="mt-3 text-center text-xs text-gray-500">
+                  {localStorage.getItem('formData') ? '基于localStorage数据自动生成' : '基于当前表单数据生成'}
+                </div>
               </div>
             )}
             
@@ -599,6 +690,98 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+                
+                {/* 自定义CSS样式，覆盖html5-qrcode的默认样式 */}
+                <style jsx>{`
+                  #qr-reader button {
+                    background-color: #2563eb !important;
+                    color: white !important;
+                    border: none !important;
+                    padding: 0.5rem 1rem !important;
+                    border-radius: 0.375rem !important;
+                    font-size: 0.875rem !important;
+                    font-weight: 500 !important;
+                    cursor: pointer !important;
+                    transition: all 0.2s !important;
+                    margin: 0.25rem !important;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+                  }
+                  
+                  #qr-reader button:hover {
+                    background-color: #1d4ed8 !important;
+                  }
+                  
+                  #qr-reader button:focus {
+                    outline: none !important;
+                    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.5) !important;
+                  }
+                  
+                  #qr-reader select {
+                    background-color: white !important;
+                    border: 1px solid #d1d5db !important;
+                    border-radius: 0.375rem !important;
+                    padding: 0.5rem !important;
+                    font-size: 0.875rem !important;
+                    color: #374151 !important;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+                  }
+                  
+                  #qr-reader input[type="file"] {
+                    background-color: #2563eb !important;
+                    color: white !important;
+                    border: none !important;
+                    padding: 0.5rem 1rem !important;
+                    border-radius: 0.375rem !important;
+                    font-size: 0.875rem !important;
+                    cursor: pointer !important;
+                    margin: 0.25rem !important;
+                  }
+                  
+                  #qr-reader input[type="file"]:hover {
+                    background-color: #1d4ed8 !important;
+                  }
+                  
+                  #qr-reader .qr-reader__scan_region {
+                    border: 2px solid #2563eb !important;
+                    border-radius: 0.5rem !important;
+                  }
+                  
+                  #qr-reader .qr-reader__scan_region video {
+                    border-radius: 0.5rem !important;
+                  }
+                  
+                  #qr-reader .qr-reader__header {
+                    background-color: #f8fafc !important;
+                    border-bottom: 1px solid #e2e8f0 !important;
+                    padding: 1rem !important;
+                    border-radius: 0.5rem 0.5rem 0 0 !important;
+                  }
+                  
+                  #qr-reader .qr-reader__header h1 {
+                    color: #1f2937 !important;
+                    font-size: 1.125rem !important;
+                    font-weight: 600 !important;
+                    margin: 0 !important;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+                  }
+                  
+                  #qr-reader .qr-reader__header p {
+                    color: #6b7280 !important;
+                    font-size: 0.875rem !important;
+                    margin: 0.5rem 0 0 0 !important;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+                  }
+                  #qr-reader reader__scan_region img{
+                  margin:0 auto
+                  }
+              
+                  #qr-reader .qr-reader__footer {
+                    background-color: #f8fafc !important;
+                    border-top: 1px solid #e2e8f0 !important;
+                    padding: 1rem !important;
+                    border-radius: 0 0 0.5rem 0.5rem !important;
+                  }
+                `}</style>
               </div>
             )}
             
