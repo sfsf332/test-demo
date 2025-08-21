@@ -26,9 +26,10 @@ export default function Home() {
   const [scannedData, setScannedData] = useState<string>("");
   const [decryptedData, setDecryptedData] = useState<any>(null);
   const [currentCamera, setCurrentCamera] = useState<string>("environment"); // "environment" 为后置，"user" 为前置
+  const [isMobile, setIsMobile] = useState<boolean>(false);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  // 页面加载时从localStorage读取数据
+  // 页面加载时从localStorage读取数据和检测设备类型
   useEffect(() => {
     const savedData = localStorage.getItem('formData');
     if (savedData) {
@@ -39,6 +40,24 @@ export default function Home() {
         console.error('解析localStorage数据失败:', error);
       }
     }
+
+    // 检测是否为手机环境
+    const detectMobile = () => {
+      const userAgent = navigator.userAgent.toLowerCase();
+      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+      const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isSmallScreen = window.innerWidth <= 768;
+      
+      const mobile = isMobileDevice || isTouchDevice || isSmallScreen;
+      setIsMobile(mobile);
+      
+      // 如果是手机环境，强制使用后置摄像头
+      if (mobile) {
+        setCurrentCamera("environment");
+      }
+    };
+
+    detectMobile();
   }, []);
 
   // 组件卸载时清理扫描器
@@ -155,10 +174,13 @@ export default function Home() {
     setDecryptedData(null);
     
     try {
+      // 如果是手机环境，强制使用后置摄像头
+      const facingMode = isMobile ? "environment" : (currentCamera === "environment" ? "environment" : "user");
+      
       // 首先申请摄像头权限
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
-          facingMode: currentCamera === "environment" ? "environment" : "user",
+          facingMode: facingMode,
           width: { ideal: 1280 },
           height: { ideal: 720 }
         } 
@@ -244,6 +266,12 @@ export default function Home() {
   };
 
   const switchCamera = () => {
+    // 如果是手机环境，不允许切换摄像头
+    if (isMobile) {
+      alert('手机环境强制使用后置摄像头，无法切换！');
+      return;
+    }
+    
     if (scannerRef.current) {
       // 停止当前扫描器
       scannerRef.current.clear();
@@ -364,8 +392,18 @@ export default function Home() {
     >
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-center text-gray-800 mb-8">
-          测试localstorage导入导出
+          数据加密管理系统
         </h1>
+        {isMobile && (
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 002 2z" />
+              </svg>
+              手机环境 - 强制使用后置摄像头
+            </div>
+          </div>
+        )}
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* 左侧：二维码相关功能 */}
@@ -467,12 +505,14 @@ export default function Home() {
                 </div>
                 <div id="qr-reader" className="w-full"></div>
                 <div className="mt-4 text-center space-x-4">
-                  <button
-                    onClick={switchCamera}
-                    className="bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-                  >
-                    切换摄像头 ({currentCamera === "environment" ? "后置" : "前置"})
-                  </button>
+                  {!isMobile && (
+                    <button
+                      onClick={switchCamera}
+                      className="bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+                    >
+                      切换摄像头 ({currentCamera === "environment" ? "后置" : "前置"})
+                    </button>
+                  )}
                   <button
                     onClick={stopScanning}
                     className="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
@@ -481,7 +521,7 @@ export default function Home() {
                   </button>
                 </div>
                 <div className="mt-2 text-center text-sm text-gray-600">
-                  当前使用: {currentCamera === "environment" ? "后置摄像头" : "前置摄像头"}
+                  当前使用: {isMobile ? "后置摄像头（手机环境强制）" : (currentCamera === "environment" ? "后置摄像头" : "前置摄像头")}
                 </div>
               </div>
             )}
