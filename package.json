@@ -8,8 +8,9 @@
     "start": "next start"
   },
   "dependencies": {
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "crypto-js": "^4.2.0",
-    "html5-qrcode": "^2.3.8",
     "next": "15.5.0",
     "qrcode": "^1.5.4",
     "react": "19.1.0",

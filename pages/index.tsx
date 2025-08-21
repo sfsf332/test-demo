@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
 import CryptoJS from "crypto-js";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { BrowserMultiFormatReader, Result } from "@zxing/library";
 import { Geist, Geist_Mono } from "next/font/google";
 
 const geistSans = Geist({
@@ -28,7 +28,7 @@ export default function Home() {
   const [currentCamera, setCurrentCamera] = useState<string>("environment"); // "environment" 为后置，"user" 为前置
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [actualCameraType, setActualCameraType] = useState<string>("未知");
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scannerRef = useRef<BrowserMultiFormatReader | null>(null);
 
   // 页面加载时从localStorage读取数据和检测设备类型
   useEffect(() => {
@@ -79,7 +79,7 @@ export default function Home() {
     return () => {
       if (scannerRef.current) {
         try {
-          scannerRef.current.clear();
+          scannerRef.current.reset();
           scannerRef.current = null;
         } catch (error) {
           console.error('清理扫描器失败:', error);
@@ -92,7 +92,7 @@ export default function Home() {
   useEffect(() => {
     if (!isScanning && scannerRef.current) {
       try {
-        scannerRef.current.clear();
+        scannerRef.current.reset();
         scannerRef.current = null;
       } catch (error) {
         console.error('清理扫描器失败:', error);
@@ -203,6 +203,16 @@ export default function Home() {
   };
 
   const startScanning = async () => {
+    // 如果已有扫描器在运行，先停止它
+    if (scannerRef.current) {
+      try {
+        scannerRef.current.reset();
+        scannerRef.current = null;
+      } catch (error) {
+        console.error('停止之前的扫描器失败:', error);
+      }
+    }
+    
     setIsScanning(true);
     setScannedData("");
     setDecryptedData(null);
@@ -277,130 +287,75 @@ export default function Home() {
       // 停止预览流
       stream.getTracks().forEach(track => track.stop());
       
-      // 使用setTimeout确保DOM元素已经渲染
-      setTimeout(() => {
+            // 使用setTimeout确保DOM元素已经渲染
+      setTimeout(async () => {
         try {
-                  // 创建扫描器，配置为优先使用后置摄像头，并设置中文界面
-        scannerRef.current = new Html5QrcodeScanner(
-          "qr-reader",
-          { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 }
-          },
-          false
-        );
+          // 创建zxing扫描器
+          scannerRef.current = new BrowserMultiFormatReader();
           
-          // 在扫描器渲染完成后，尝试选择后置摄像头
-                  scannerRef.current.render((decodedText) => {
-          // 扫描成功
-          setScannedData(decodedText);
-          setIsScanning(false);
-          
-          // 尝试解密数据
-          try {
-            const decrypted = CryptoJS.AES.decrypt(decodedText, 'your-secret-key');
-            const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
-            if (decryptedString) {
-              const parsedData = JSON.parse(decryptedString);
-              setDecryptedData(parsedData);
-              
-              // 将解密数据写入localStorage
-              localStorage.setItem('formData', JSON.stringify(parsedData));
-              
-              // 更新表单状态
-              setFormData(parsedData);
-              
-              // 重新生成加密字符串和二维码
-              setEncryptedString(decryptedString);
-              QRCode.toDataURL(decryptedString).then(qrCodeDataUrl => {
-                setQrCodeUrl(qrCodeDataUrl);
-              });
-              
-              alert('二维码扫描成功，数据已解密并保存到localStorage！');
-            } else {
-              alert('扫描成功，但数据解密失败！');
-            }
-          } catch (error) {
-            console.error('解密失败:', error);
-            alert('扫描成功，但数据解密失败！');
+          // 获取视频元素
+          const videoElement = document.getElementById('qr-video') as HTMLVideoElement;
+          if (!videoElement) {
+            throw new Error('视频元素未找到');
           }
           
-          // 停止扫描器
-          if (scannerRef.current) {
-            scannerRef.current.clear();
-            scannerRef.current = null;
-          }
-        }, (error) => {
-          console.error('扫描错误:', error);
-        });
-
-        // 在扫描器渲染完成后，替换英文标签为中文
-        setTimeout(() => {
-          try {
-            // 替换扫描器中的英文标签为中文
-            const qrReader = document.getElementById('qr-reader');
-            if (qrReader) {
-              // 替换标题
-              const titleElements = qrReader.querySelectorAll('h1');
-              titleElements.forEach(el => {
-                if (el.textContent?.includes('QR Code Scanner')) {
-                  el.textContent = '二维码扫描器';
+          // 开始扫描
+          await scannerRef.current.decodeFromVideoDevice(
+            null, // 使用默认摄像头
+            videoElement,
+            (result: Result | null, error: any) => {
+              if (result) {
+                // 扫描成功
+                const decodedText = result.getText();
+                setScannedData(decodedText);
+                
+                // 立即停止扫描器，避免重复扫描
+                if (scannerRef.current) {
+                  try {
+                    scannerRef.current.reset();
+                    scannerRef.current = null;
+                  } catch (error) {
+                    console.error('停止扫描器失败:', error);
+                  }
                 }
-              });
-
-              // 替换描述文字
-              const descElements = qrReader.querySelectorAll('p');
-              descElements.forEach(el => {
-                if (el.textContent?.includes('Select a file to scan')) {
-                  el.textContent = '选择文件进行扫描';
-                } else if (el.textContent?.includes('Or drag and drop a file')) {
-                  el.textContent = '或拖拽文件到此处';
-                } else if (el.textContent?.includes('No file selected')) {
-                  el.textContent = '未选择文件';
+                
+                // 设置扫描状态为false
+                setIsScanning(false);
+                
+                // 尝试解密数据
+                try {
+                  const decrypted = CryptoJS.AES.decrypt(decodedText, 'your-secret-key');
+                  const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
+                  if (decryptedString) {
+                    const parsedData = JSON.parse(decryptedString);
+                    setDecryptedData(parsedData);
+                    
+                    // 将解密数据写入localStorage
+                    localStorage.setItem('formData', JSON.stringify(parsedData));
+                    
+                    // 更新表单状态
+                    setFormData(parsedData);
+                    
+                    // 重新生成加密字符串和二维码
+                    setEncryptedString(decryptedString);
+                    QRCode.toDataURL(decryptedString).then(qrCodeDataUrl => {
+                      setQrCodeUrl(qrCodeDataUrl);
+                    });
+                    
+                    alert('二维码扫描成功，数据已解密并保存到localStorage！');
+                  } else {
+                    alert('扫描成功，但数据解密失败！');
+                  }
+                } catch (error) {
+                  console.error('解密失败:', error);
+                  alert('扫描成功，但数据解密失败！');
                 }
-              });
-
-              // 替换按钮文字
-              const buttonElements = qrReader.querySelectorAll('button');
-              buttonElements.forEach(el => {
-                if (el.textContent?.includes('Select File')) {
-                  el.textContent = '选择文件';
-                } else if (el.textContent?.includes('Start Scanning')) {
-                  el.textContent = '开始扫描';
-                } else if (el.textContent?.includes('Stop Scanning')) {
-                  el.textContent = '停止扫描';
-                } else if (el.textContent?.includes('Switch Camera')) {
-                  el.textContent = '切换摄像头';
-                }
-              });
-
-              // 替换选择框选项
-              const selectElements = qrReader.querySelectorAll('select');
-              selectElements.forEach(el => {
-                if (el.textContent?.includes('Environment')) {
-                  el.textContent = el.textContent.replace('Environment', '后置摄像头');
-                } else if (el.textContent?.includes('User')) {
-                  el.textContent = el.textContent.replace('User', '前置摄像头');
-                }
-              });
+              } else if (error && error.name !== 'NotFoundException') {
+                console.error('扫描错误:', error);
+              }
             }
-          } catch (error) {
-            console.log('替换中文标签失败:', error);
-          }
-        }, 500);
-
-        // 尝试自动选择后置摄像头（如果可用）
-        if (currentCamera === "environment") {
-          // 延迟一下，等待扫描器完全初始化
-          setTimeout(() => {
-            try {
-              // 这里可以尝试通过DOM操作来切换摄像头
-              // 由于html5-qrcode的限制，我们主要通过用户手动切换来实现
-            } catch (error) {
-              console.log('自动选择后置摄像头失败，用户可手动切换');
-            }
-          }, 1000);
-        }
+          );
+          
         } catch (error) {
           console.error('创建扫描器失败:', error);
           alert('创建扫描器失败，请重试！');
@@ -430,8 +385,12 @@ export default function Home() {
     
     if (scannerRef.current) {
       // 停止当前扫描器
-      scannerRef.current.clear();
-      scannerRef.current = null;
+      try {
+        scannerRef.current.reset();
+        scannerRef.current = null;
+      } catch (error) {
+        console.error('停止扫描器失败:', error);
+      }
       
       // 切换摄像头
       setCurrentCamera(prev => prev === "environment" ? "user" : "environment");
@@ -445,10 +404,16 @@ export default function Home() {
 
   const stopScanning = () => {
     if (scannerRef.current) {
-      scannerRef.current.clear();
-      scannerRef.current = null;
+      try {
+        scannerRef.current.reset();
+        scannerRef.current = null;
+      } catch (error) {
+        console.error('停止扫描器失败:', error);
+      }
     }
     setIsScanning(false);
+    setScannedData("");
+    setDecryptedData(null);
   };
 
   const clearLocalStorage = () => {
@@ -465,6 +430,12 @@ export default function Home() {
       setEncryptedString("");
       setScannedData("");
       setDecryptedData(null);
+      
+      // 停止扫描器
+      if (scannerRef.current) {
+        scannerRef.current.reset();
+        scannerRef.current = null;
+      }
       
       alert('localStorage已清空，所有数据已重置！');
     }
@@ -661,12 +632,19 @@ export default function Home() {
             {isScanning && (
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h3 className="text-lg font-semibold text-gray-800 mb-4">扫描二维码</h3>
-                <div className="text-center mb-4">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <p className="mt-2 text-sm text-gray-600">正在申请摄像头权限...</p>
+                
+                {/* 视频预览区域 */}
+                <div className="w-full flex justify-center mb-4">
+                  <video
+                    id="qr-video"
+                    className="w-full max-w-md h-64 bg-gray-100 rounded-lg border-2 border-blue-500"
+                    autoPlay
+                    playsInline
+                    muted
+                  />
                 </div>
-                <div id="qr-reader" className="w-full"></div>
-                <div className="mt-4 text-center space-x-4">
+                
+                <div className="text-center space-x-4 mb-4">
                   {!isMobile && (
                     <button
                       onClick={switchCamera}
@@ -682,7 +660,8 @@ export default function Home() {
                     停止扫描
                   </button>
                 </div>
-                <div className="mt-2 text-center text-sm text-gray-600">
+                
+                <div className="text-center text-sm text-gray-600">
                   当前使用: {isMobile ? "后置摄像头（手机环境强制）" : (currentCamera === "environment" ? "后置摄像头" : "前置摄像头")}
                   {actualCameraType !== "未知" && (
                     <div className="mt-1 text-xs text-blue-600">
@@ -691,97 +670,9 @@ export default function Home() {
                   )}
                 </div>
                 
-                {/* 自定义CSS样式，覆盖html5-qrcode的默认样式 */}
-                <style jsx>{`
-                  #qr-reader button {
-                    background-color: #2563eb !important;
-                    color: white !important;
-                    border: none !important;
-                    padding: 0.5rem 1rem !important;
-                    border-radius: 0.375rem !important;
-                    font-size: 0.875rem !important;
-                    font-weight: 500 !important;
-                    cursor: pointer !important;
-                    transition: all 0.2s !important;
-                    margin: 0.25rem !important;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
-                  }
-                  
-                  #qr-reader button:hover {
-                    background-color: #1d4ed8 !important;
-                  }
-                  
-                  #qr-reader button:focus {
-                    outline: none !important;
-                    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.5) !important;
-                  }
-                  
-                  #qr-reader select {
-                    background-color: white !important;
-                    border: 1px solid #d1d5db !important;
-                    border-radius: 0.375rem !important;
-                    padding: 0.5rem !important;
-                    font-size: 0.875rem !important;
-                    color: #374151 !important;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
-                  }
-                  
-                  #qr-reader input[type="file"] {
-                    background-color: #2563eb !important;
-                    color: white !important;
-                    border: none !important;
-                    padding: 0.5rem 1rem !important;
-                    border-radius: 0.375rem !important;
-                    font-size: 0.875rem !important;
-                    cursor: pointer !important;
-                    margin: 0.25rem !important;
-                  }
-                  
-                  #qr-reader input[type="file"]:hover {
-                    background-color: #1d4ed8 !important;
-                  }
-                  
-                  #qr-reader .qr-reader__scan_region {
-                    border: 2px solid #2563eb !important;
-                    border-radius: 0.5rem !important;
-                  }
-                  
-                  #qr-reader .qr-reader__scan_region video {
-                    border-radius: 0.5rem !important;
-                  }
-                  
-                  #qr-reader .qr-reader__header {
-                    background-color: #f8fafc !important;
-                    border-bottom: 1px solid #e2e8f0 !important;
-                    padding: 1rem !important;
-                    border-radius: 0.5rem 0.5rem 0 0 !important;
-                  }
-                  
-                  #qr-reader .qr-reader__header h1 {
-                    color: #1f2937 !important;
-                    font-size: 1.125rem !important;
-                    font-weight: 600 !important;
-                    margin: 0 !important;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
-                  }
-                  
-                  #qr-reader .qr-reader__header p {
-                    color: #6b7280 !important;
-                    font-size: 0.875rem !important;
-                    margin: 0.5rem 0 0 0 !important;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
-                  }
-                  #qr-reader reader__scan_region img{
-                  margin:0 auto
-                  }
-              
-                  #qr-reader .qr-reader__footer {
-                    background-color: #f8fafc !important;
-                    border-top: 1px solid #e2e8f0 !important;
-                    padding: 1rem !important;
-                    border-radius: 0 0 0.5rem 0.5rem !important;
-                  }
-                `}</style>
+                <div className="mt-4 text-center text-sm text-gray-600">
+                  将二维码对准摄像头进行扫描
+                </div>
               </div>
             )}
             
