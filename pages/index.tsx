@@ -27,6 +27,7 @@ export default function Home() {
   const [decryptedData, setDecryptedData] = useState<any>(null);
   const [currentCamera, setCurrentCamera] = useState<string>("environment"); // "environment" 为后置，"user" 为前置
   const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [actualCameraType, setActualCameraType] = useState<string>("未知");
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   // 页面加载时从localStorage读取数据和检测设备类型
@@ -175,18 +176,72 @@ export default function Home() {
     
     try {
       // 如果是手机环境，强制使用后置摄像头
-      const facingMode = isMobile ? { exact: "environment"} : (currentCamera === "environment" ? "environment" : "user");
+      let stream;
+      if (isMobile) {
+        try {
+          // 首先尝试强制使用后置摄像头
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            video: {
+              facingMode: { exact: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          });
+          console.log('成功获取后置摄像头权限');
+        } catch (backCameraError) {
+          console.log('强制后置摄像头失败，尝试普通后置摄像头:', backCameraError);
+          try {
+            // 如果强制失败，尝试普通后置摄像头
+            stream = await navigator.mediaDevices.getUserMedia({ 
+              video: {
+                facingMode: "environment",
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+              }
+            });
+            console.log('成功获取普通后置摄像头权限');
+          } catch (fallbackError) {
+            console.log('后置摄像头失败，尝试任意可用摄像头:', fallbackError);
+            // 最后尝试任意可用的摄像头
+            stream = await navigator.mediaDevices.getUserMedia({ 
+              video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+              }
+            });
+            console.log('成功获取任意摄像头权限');
+          }
+        }
+      } else {
+        // 桌面环境：使用选择的摄像头
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: {
+            facingMode: currentCamera === "environment" ? "environment" : "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        });
+      }
       
-      // 首先申请摄像头权限
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode: facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        } 
-      });
+      // 权限获取成功，检测实际使用的摄像头类型
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const capabilities = videoTrack.getCapabilities();
+        if (capabilities.facingMode) {
+          const facingMode = capabilities.facingMode;
+          if (facingMode.includes('environment')) {
+            setActualCameraType('后置摄像头');
+          } else if (facingMode.includes('user')) {
+            setActualCameraType('前置摄像头');
+          } else {
+            setActualCameraType('未知类型摄像头');
+          }
+        } else {
+          setActualCameraType('未知类型摄像头');
+        }
+      }
       
-      // 权限获取成功，停止预览流
+      // 停止预览流
       stream.getTracks().forEach(track => track.stop());
       
       // 使用setTimeout确保DOM元素已经渲染
@@ -203,35 +258,48 @@ export default function Home() {
           );
           
           // 在扫描器渲染完成后，尝试选择后置摄像头
-          scannerRef.current.render((decodedText) => {
-            // 扫描成功
-            setScannedData(decodedText);
-            setIsScanning(false);
-            
-            // 尝试解密数据
-            try {
-              const decrypted = CryptoJS.AES.decrypt(decodedText, 'your-secret-key');
-              const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
-              if (decryptedString) {
-                const parsedData = JSON.parse(decryptedString);
-                setDecryptedData(parsedData);
-                alert('二维码扫描成功，数据已解密！');
-              } else {
-                alert('扫描成功，但数据解密失败！');
-              }
-            } catch (error) {
-              console.error('解密失败:', error);
+                  scannerRef.current.render((decodedText) => {
+          // 扫描成功
+          setScannedData(decodedText);
+          setIsScanning(false);
+          
+          // 尝试解密数据
+          try {
+            const decrypted = CryptoJS.AES.decrypt(decodedText, 'your-secret-key');
+            const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
+            if (decryptedString) {
+              const parsedData = JSON.parse(decryptedString);
+              setDecryptedData(parsedData);
+              
+              // 将解密数据写入localStorage
+              localStorage.setItem('formData', JSON.stringify(parsedData));
+              
+              // 更新表单状态
+              setFormData(parsedData);
+              
+              // 重新生成加密字符串和二维码
+              setEncryptedString(decryptedString);
+              QRCode.toDataURL(decryptedString).then(qrCodeDataUrl => {
+                setQrCodeUrl(qrCodeDataUrl);
+              });
+              
+              alert('二维码扫描成功，数据已解密并保存到localStorage！');
+            } else {
               alert('扫描成功，但数据解密失败！');
             }
-            
-            // 停止扫描器
-            if (scannerRef.current) {
-              scannerRef.current.clear();
-              scannerRef.current = null;
-            }
-          }, (error) => {
-            console.error('扫描错误:', error);
-          });
+          } catch (error) {
+            console.error('解密失败:', error);
+            alert('扫描成功，但数据解密失败！');
+          }
+          
+          // 停止扫描器
+          if (scannerRef.current) {
+            scannerRef.current.clear();
+            scannerRef.current = null;
+          }
+        }, (error) => {
+          console.error('扫描错误:', error);
+        });
 
           // 尝试自动选择后置摄像头（如果可用）
           if (currentCamera === "environment") {
@@ -398,9 +466,12 @@ export default function Home() {
           <div className="text-center mb-6">
             <div className="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 002 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 002 2z" />
               </svg>
               手机环境 - 强制使用后置摄像头
+            </div>
+            <div className="mt-2 text-xs text-gray-600">
+              检测到移动设备，将优先使用后置摄像头进行扫描
             </div>
           </div>
         )}
@@ -522,6 +593,11 @@ export default function Home() {
                 </div>
                 <div className="mt-2 text-center text-sm text-gray-600">
                   当前使用: {isMobile ? "后置摄像头（手机环境强制）" : (currentCamera === "environment" ? "后置摄像头" : "前置摄像头")}
+                  {actualCameraType !== "未知" && (
+                    <div className="mt-1 text-xs text-blue-600">
+                      实际检测: {actualCameraType}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -534,6 +610,13 @@ export default function Home() {
                     {scannedData}
                   </p>
                 </div>
+                {decryptedData && (
+                  <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-center">
+                    <span className="text-green-800 text-sm font-medium">
+                      ✅ 数据已成功保存到localStorage
+                    </span>
+                  </div>
+                )}
               </div>
             )}
             
@@ -544,6 +627,11 @@ export default function Home() {
                   <pre className="text-sm text-gray-600 overflow-auto">
                     {JSON.stringify(decryptedData, null, 2)}
                   </pre>
+                </div>
+                <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-center">
+                  <span className="text-green-800 text-sm font-medium">
+                    ✅ 数据已成功保存到localStorage
+                  </span>
                 </div>
               </div>
             )}
