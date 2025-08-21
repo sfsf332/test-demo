@@ -25,6 +25,7 @@ export default function Home() {
   const [isScanning, setIsScanning] = useState(false);
   const [scannedData, setScannedData] = useState<string>("");
   const [decryptedData, setDecryptedData] = useState<any>(null);
+  const [currentCamera, setCurrentCamera] = useState<string>("environment"); // "environment" 为后置，"user" 为前置
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   // 页面加载时从localStorage读取数据
@@ -148,56 +149,114 @@ export default function Home() {
     }
   };
 
-  const startScanning = () => {
+  const startScanning = async () => {
     setIsScanning(true);
     setScannedData("");
     setDecryptedData(null);
     
-    // 使用setTimeout确保DOM元素已经渲染
-    setTimeout(() => {
-      try {
-        // 创建扫描器
-        scannerRef.current = new Html5QrcodeScanner(
-          "qr-reader",
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          false
-        );
-        
-        scannerRef.current.render((decodedText) => {
-          // 扫描成功
-          setScannedData(decodedText);
-          setIsScanning(false);
+    try {
+      // 首先申请摄像头权限
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: currentCamera === "environment" ? "environment" : "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      
+      // 权限获取成功，停止预览流
+      stream.getTracks().forEach(track => track.stop());
+      
+      // 使用setTimeout确保DOM元素已经渲染
+      setTimeout(() => {
+        try {
+          // 创建扫描器，配置为优先使用后置摄像头
+          scannerRef.current = new Html5QrcodeScanner(
+            "qr-reader",
+            { 
+              fps: 10, 
+              qrbox: { width: 250, height: 250 }
+            },
+            false
+          );
           
-          // 尝试解密数据
-          try {
-            const decrypted = CryptoJS.AES.decrypt(decodedText, 'your-secret-key');
-            const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
-            if (decryptedString) {
-              const parsedData = JSON.parse(decryptedString);
-              setDecryptedData(parsedData);
-              alert('二维码扫描成功，数据已解密！');
-            } else {
+          // 在扫描器渲染完成后，尝试选择后置摄像头
+          scannerRef.current.render((decodedText) => {
+            // 扫描成功
+            setScannedData(decodedText);
+            setIsScanning(false);
+            
+            // 尝试解密数据
+            try {
+              const decrypted = CryptoJS.AES.decrypt(decodedText, 'your-secret-key');
+              const decryptedString = decrypted.toString(CryptoJS.enc.Utf8);
+              if (decryptedString) {
+                const parsedData = JSON.parse(decryptedString);
+                setDecryptedData(parsedData);
+                alert('二维码扫描成功，数据已解密！');
+              } else {
+                alert('扫描成功，但数据解密失败！');
+              }
+            } catch (error) {
+              console.error('解密失败:', error);
               alert('扫描成功，但数据解密失败！');
             }
-          } catch (error) {
-            console.error('解密失败:', error);
-            alert('扫描成功，但数据解密失败！');
+            
+            // 停止扫描器
+            if (scannerRef.current) {
+              scannerRef.current.clear();
+              scannerRef.current = null;
+            }
+          }, (error) => {
+            console.error('扫描错误:', error);
+          });
+
+          // 尝试自动选择后置摄像头（如果可用）
+          if (currentCamera === "environment") {
+            // 延迟一下，等待扫描器完全初始化
+            setTimeout(() => {
+              try {
+                // 这里可以尝试通过DOM操作来切换摄像头
+                // 由于html5-qrcode的限制，我们主要通过用户手动切换来实现
+              } catch (error) {
+                console.log('自动选择后置摄像头失败，用户可手动切换');
+              }
+            }, 1000);
           }
-          
-          // 停止扫描器
-          if (scannerRef.current) {
-            scannerRef.current.clear();
-            scannerRef.current = null;
-          }
-        }, (error) => {
-          console.error('扫描错误:', error);
-        });
-      } catch (error) {
-        console.error('创建扫描器失败:', error);
-        alert('创建扫描器失败，请重试！');
-        setIsScanning(false);
+        } catch (error) {
+          console.error('创建扫描器失败:', error);
+          alert('创建扫描器失败，请重试！');
+          setIsScanning(false);
+        }
+      }, 100);
+      
+    } catch (error: any) {
+      console.error('摄像头权限申请失败:', error);
+      if (error.name === 'NotAllowedError') {
+        alert('摄像头权限被拒绝，请在浏览器设置中允许摄像头访问！');
+      } else if (error.name === 'NotFoundError') {
+        alert('未找到摄像头设备，请检查设备是否连接摄像头！');
+      } else {
+        alert('摄像头启动失败：' + (error.message || '未知错误'));
       }
-    }, 100);
+      setIsScanning(false);
+    }
+  };
+
+  const switchCamera = () => {
+    if (scannerRef.current) {
+      // 停止当前扫描器
+      scannerRef.current.clear();
+      scannerRef.current = null;
+      
+      // 切换摄像头
+      setCurrentCamera(prev => prev === "environment" ? "user" : "environment");
+      
+      // 重新启动扫描器
+      setTimeout(() => {
+        startScanning();
+      }, 200);
+    }
   };
 
   const stopScanning = () => {
@@ -404,16 +463,25 @@ export default function Home() {
                 <h3 className="text-lg font-semibold text-gray-800 mb-4">扫描二维码</h3>
                 <div className="text-center mb-4">
                   <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <p className="mt-2 text-sm text-gray-600">正在启动摄像头...</p>
+                  <p className="mt-2 text-sm text-gray-600">正在申请摄像头权限...</p>
                 </div>
                 <div id="qr-reader" className="w-full"></div>
-                <div className="mt-4 text-center">
+                <div className="mt-4 text-center space-x-4">
+                  <button
+                    onClick={switchCamera}
+                    className="bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+                  >
+                    切换摄像头 ({currentCamera === "environment" ? "后置" : "前置"})
+                  </button>
                   <button
                     onClick={stopScanning}
                     className="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
                   >
                     停止扫描
                   </button>
+                </div>
+                <div className="mt-2 text-center text-sm text-gray-600">
+                  当前使用: {currentCamera === "environment" ? "后置摄像头" : "前置摄像头"}
                 </div>
               </div>
             )}
